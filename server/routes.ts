@@ -3,9 +3,21 @@ import { eq, and, gte, lte } from "drizzle-orm";
 import { db } from "../db";
 import { classes, bookings, users } from "../db/schema";
 import { startOfWeek, endOfWeek } from "date-fns";
+import { setupAuth } from "./auth";
+
+// Middleware to check if user is authenticated
+const isAuthenticated = (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
+  if (req.isAuthenticated()) {
+    return next();
+  }
+  res.status(401).json({ error: "Unauthorized" });
+};
 
 export function registerRoutes(app: Express) {
-  // Get classes for the current week
+  // Set up authentication routes
+  setupAuth(app);
+
+  // Get classes for the current week (public route)
   app.get("/api/classes", async (req, res) => {
     try {
       const start = startOfWeek(new Date());
@@ -25,14 +37,15 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Get bookings with user data
-  app.get("/api/bookings", async (req, res) => {
+  // Get bookings with user data (protected route)
+  app.get("/api/bookings", isAuthenticated, async (req, res) => {
     try {
       const result = await db.query.bookings.findMany({
         with: {
           user: true,
           class: true
-        }
+        },
+        where: eq(bookings.userId, req.user.id)
       });
       
       res.json(result);
@@ -41,14 +54,13 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Create a new booking
-  app.post("/api/bookings", async (req, res) => {
+  // Create a new booking (protected route)
+  app.post("/api/bookings", isAuthenticated, async (req, res) => {
     try {
       const { classId } = req.body;
-      const userId = 1; // TODO: Get from session
 
       const result = await db.insert(bookings).values({
-        userId,
+        userId: req.user.id,
         classId,
         status: "confirmed"
       }).returning();
@@ -59,7 +71,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Initialize sample classes
+  // Initialize sample classes (this should be protected in production)
   app.post("/api/init-classes", async (req, res) => {
     try {
       const result = await db.insert(classes).values([
